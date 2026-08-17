@@ -76,6 +76,7 @@ import type {
 import { getDisabledAdapterTypes } from "../services/adapter-plugin-store.js";
 import { skillVersionSelectionMap } from "../services/runtime-skill-selections.js";
 import { secretService } from "../services/secrets.js";
+import { waffoModelDefaultsRoutes } from "./waffo-model-defaults.js";
 import { authorizationDeniedDetails } from "../services/authorization.js";
 import {
   detectAdapterModel,
@@ -4753,6 +4754,8 @@ export function agentRoutes(
       outputSilence: await heartbeat.buildRunOutputSilence({ ...run, companyId: issue.companyId }),
     });
   });
+
+  router.use(waffoModelDefaultsRoutes(db, assertCompanyAccess));
 
   return router;
 }

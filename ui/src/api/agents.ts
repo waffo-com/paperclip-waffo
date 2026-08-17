@@ -259,6 +259,16 @@ export const agentsApi = {
     ),
   availableSkills: () =>
     api.get<{ skills: AvailableSkill[] }>("/skills/available"),
+  /**
+   * Applies this deployment's model defaults to a draft agent configuration.
+   * The server applies rather than describes, so the fill-in rule has one
+   * implementation instead of one per layer.
+   */
+  applyModelDefaults: (companyId: string, adapterType: string, adapterConfig: Record<string, unknown>) =>
+    api.post<{ adapterConfig: Record<string, unknown> }>(
+      `/companies/${encodeURIComponent(companyId)}/agent-model-defaults`,
+      { adapterType, adapterConfig },
+    ),
 };
 
 export interface AvailableSkill {

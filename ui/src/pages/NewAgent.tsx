@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "@/lib/router";
 import { useCompany } from "../context/CompanyContext";
@@ -143,6 +143,42 @@ export function NewAgent() {
       return createValuesForAdapterType(requested as CreateConfigValues["adapterType"]);
     });
   }, [presetAdapterType]);
+
+  // Ask the server to apply this deployment's model defaults to the draft, so
+  // the fields arrive filled in and editable rather than blank. The server
+  // applies rather than describes — the fill-in rule ("only what is absent; a
+  // blank value means the team opted out") lives there alone, and field naming
+  // stays with the adapter rather than being reconstructed here.
+  //
+  // Keyed by harness because each needs a different set of fields, and the
+  // previous one's are wrong for it. Runs once per harness: refilling a value
+  // the person cleared would undo their opt-out.
+  const prefilledAdapterTypes = useRef(new Set<string>());
+  useEffect(() => {
+    if (!selectedCompanyId) return;
+    const adapterType = configValues.adapterType;
+    if (prefilledAdapterTypes.current.has(adapterType)) return;
+    prefilledAdapterTypes.current.add(adapterType);
+
+    let cancelled = false;
+    void agentsApi
+      .applyModelDefaults(selectedCompanyId, adapterType, getUIAdapter(adapterType).buildAdapterConfig(configValues))
+      .then(({ adapterConfig }) => {
+        if (cancelled) return;
+        const env = adapterConfig.env;
+        setConfigValues((prev) => prev.adapterType !== adapterType ? prev : {
+          ...prev,
+          envBindings: (env && typeof env === "object" ? env : {}) as Record<string, unknown>,
+          model: typeof adapterConfig.model === "string" ? adapterConfig.model : prev.model,
+        });
+      })
+      .catch(() => {
+        // A prefill that cannot be fetched must not block agent creation; the
+        // server fills the same defaults again on save.
+        prefilledAdapterTypes.current.delete(adapterType);
+      });
+    return () => { cancelled = true; };
+  }, [selectedCompanyId, configValues.adapterType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const createAgent = useMutation({
     mutationFn: (data: Record<string, unknown>) =>

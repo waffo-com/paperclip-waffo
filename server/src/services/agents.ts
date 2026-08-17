@@ -30,6 +30,7 @@ import { syncAgentAdapterEnvBindings } from "./agent-secret-bindings.js";
 import { normalizeAgentPermissions } from "./agent-permissions.js";
 import { REDACTED_EVENT_VALUE, sanitizeRecord } from "../redaction.js";
 import { secretService } from "./secrets.js";
+import { fillModelDefaults } from "./instance-model-defaults.js";
 import {
   builtInAgentMarkersEqual,
   readBuiltInAgentMarker,
@@ -609,8 +610,17 @@ export function agentService(db: Db) {
       const normalizedPermissions = normalizeAgentPermissions(data.permissions, role);
       const runtimeConfig = normalizeRuntimeConfigForNewAgent(data.runtimeConfig);
       const adapterType = data.adapterType ?? "process";
-      const adapterConfig = isPlainRecord(data.adapterConfig)
-        ? await secretsSvc.normalizeAdapterConfigForPersistence(companyId, data.adapterConfig, { adapterType })
+      // Model credentials the caller left out — see instance-model-defaults.
+      // Applied before normalization so a generated secret_ref takes the same
+      // validation and binding path as one a human picked in the UI.
+      const adapterConfigWithDefaults = await fillModelDefaults({
+        secretsSvc,
+        companyId,
+        adapterType,
+        adapterConfig: isPlainRecord(data.adapterConfig) ? data.adapterConfig : {},
+      });
+      const adapterConfig = Object.keys(adapterConfigWithDefaults).length > 0
+        ? await secretsSvc.normalizeAdapterConfigForPersistence(companyId, adapterConfigWithDefaults, { adapterType })
         : {};
       return db.transaction(async (tx) => {
         const txDb = tx as unknown as Db;
