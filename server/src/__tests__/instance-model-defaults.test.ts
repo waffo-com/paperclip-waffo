@@ -1,14 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   applyModelDefaultsPatch,
   buildModelDefaultsPatch,
   resolveModelDefaultsSettings,
+  seedCompanyModelSecret,
   DEFAULT_MODEL_SECRET_NAME_FALLBACK,
   type ModelDefaultsSettings,
 } from "../services/instance-model-defaults.js";
 
 const GATEWAY: ModelDefaultsSettings = {
   secretName: "ai-proxy-api-key",
+  secretValue: null,
   baseUrl: "https://ai-proxy.waffo.co",
   hermesGatewayUrl: null,
   openclawUrl: null,
@@ -33,6 +35,7 @@ describe("resolveModelDefaultsSettings", () => {
       PAPERCLIP_DEFAULT_OPENAI_MODEL: "gpt-5.4",
     })).toEqual({
       secretName: "risk-team-gateway",
+      secretValue: null,
       baseUrl: "https://ai-proxy.waffo.co",
       hermesGatewayUrl: null,
       openclawUrl: null,
@@ -222,5 +225,67 @@ describe("applyModelDefaultsPatch", () => {
   it("returns the config untouched when there is nothing to fill in", () => {
     const config = { model: "claude-opus-4-6" };
     expect(applyModelDefaultsPatch(config, { env: {}, model: null, values: {} })).toBe(config);
+  });
+});
+
+describe("seedCompanyModelSecret", () => {
+  const ORIGINAL = process.env.PAPERCLIP_DEFAULT_MODEL_API_KEY;
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.PAPERCLIP_DEFAULT_MODEL_API_KEY;
+    else process.env.PAPERCLIP_DEFAULT_MODEL_API_KEY = ORIGINAL;
+  });
+
+  const stubSecrets = (existing: { id: string } | null) => {
+    const created: unknown[] = [];
+    return {
+      created,
+      svc: {
+        getByName: async () => existing,
+        createManagedLocalSecret: async (_c: string, secret: unknown) => {
+          created.push(secret);
+        },
+      },
+    };
+  };
+
+  it("seeds the gateway key so agents provisioned moments later can bind it", async () => {
+    process.env.PAPERCLIP_DEFAULT_MODEL_API_KEY = "sk-gateway";
+    const { svc, created } = stubSecrets(null);
+    await expect(seedCompanyModelSecret({ secretsSvc: svc, companyId: "c1" }))
+      .resolves.toBe("seeded");
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({ name: "ai-proxy-api-key", value: "sk-gateway" });
+  });
+
+  it("stays inert when the deployment configured no key", async () => {
+    delete process.env.PAPERCLIP_DEFAULT_MODEL_API_KEY;
+    const { svc, created } = stubSecrets(null);
+    await expect(seedCompanyModelSecret({ secretsSvc: svc, companyId: "c1" }))
+      .resolves.toBe("not-configured");
+    expect(created).toHaveLength(0);
+  });
+
+  it("never overwrites a key the team already has", async () => {
+    process.env.PAPERCLIP_DEFAULT_MODEL_API_KEY = "sk-gateway";
+    const { svc, created } = stubSecrets({ id: "existing" });
+    await expect(seedCompanyModelSecret({ secretsSvc: svc, companyId: "c1" }))
+      .resolves.toBe("already-present");
+    expect(created).toHaveLength(0);
+  });
+
+  it("lets company creation succeed even if seeding fails", async () => {
+    // A company without its key is still usable — its agents surface the
+    // missing credential normally. Aborting creation would be a worse trade.
+    process.env.PAPERCLIP_DEFAULT_MODEL_API_KEY = "sk-gateway";
+    const warnings: string[] = [];
+    await expect(seedCompanyModelSecret({
+      secretsSvc: {
+        getByName: async () => null,
+        createManagedLocalSecret: async () => { throw new Error("provider unavailable"); },
+      },
+      companyId: "c1",
+      logger: { warn: (_o, m) => { warnings.push(m); } },
+    })).resolves.toBe("failed");
+    expect(warnings).toHaveLength(1);
   });
 });

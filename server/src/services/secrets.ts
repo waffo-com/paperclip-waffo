@@ -3370,6 +3370,9 @@ export function secretService(db: Db) {
     resolveSecretValueForAgentAccess,
     listAgentSecretAccess,
     resolveSecretValueForEphemeralAccess,
+    // Exposed so company creation can seed the shared gateway key through the
+    // same encrypted path a human uses in the UI.
+    createManagedLocalSecret,
 
     create: async (
       companyId: string,

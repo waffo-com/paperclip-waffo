@@ -38,6 +38,9 @@ import { environmentService } from "./environments.js";
 import { heartbeatService } from "./heartbeat.js";
 import { logActivity } from "./activity-log.js";
 import { builtInAgentService } from "./built-in-agents.js";
+import { secretService } from "./secrets.js";
+import { seedCompanyModelSecret } from "./instance-model-defaults.js";
+import { logger } from "../middleware/logger.js";
 
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -60,6 +63,7 @@ export function companyService(db: Db) {
   const environmentsSvc = environmentService(db);
   const heartbeat = heartbeatService(db);
   const builtInAgents = builtInAgentService(db);
+  const secretsSvc = secretService(db);
 
   type CompanyTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -277,6 +281,10 @@ export function companyService(db: Db) {
     create: async (data: typeof companies.$inferInsert) => {
       const created = await createCompanyWithUniquePrefix(data);
       await environmentsSvc.ensureLocalEnvironment(created.id);
+      // Before the built-in agents below: they are provisioned in this same
+      // call and bind the gateway key by name, so a secret created after them
+      // is a secret they never get.
+      await seedCompanyModelSecret({ secretsSvc, companyId: created.id, logger });
       await builtInAgents.autoProvisionBundledAgents(created.id);
       const row = await getCompanyQuery(db)
         .where(eq(companies.id, created.id))

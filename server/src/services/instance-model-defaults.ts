@@ -31,6 +31,15 @@ const DEFAULT_MODEL_SECRET_NAME_ENV = "PAPERCLIP_DEFAULT_MODEL_SECRET_NAME";
 export const DEFAULT_MODEL_SECRET_NAME_FALLBACK = "ai-proxy-api-key";
 const DEFAULT_BASE_URL_ENV = "PAPERCLIP_DEFAULT_MODEL_BASE_URL";
 /**
+ * The gateway key itself, used to seed each new company's secret store.
+ *
+ * Without seeding, a new company's built-in agents are created milliseconds
+ * after the company row — long before anyone can add a secret by hand — so
+ * they would always be created without a key. Seeding closes that ordering
+ * gap: the secret exists before the first agent does.
+ */
+const DEFAULT_MODEL_SECRET_VALUE_ENV = "PAPERCLIP_DEFAULT_MODEL_API_KEY";
+/**
  * Two model settings rather than one per adapter: the gateway speaks two
  * protocols, and which one an agent needs follows from its harness, not from a
  * separate choice the operator should have to make four times.
@@ -212,6 +221,8 @@ const ADAPTER_GATEWAY_SPECS: Record<string, AdapterGatewaySpec> = {
 
 export interface ModelDefaultsSettings {
   secretName: string;
+  /** The gateway key to seed a new company with; null disables seeding. */
+  secretValue: string | null;
   /** Model gateway, for the harnesses that speak to one directly. */
   baseUrl: string | null;
   /** A Hermes API server this deployment runs, if any. */
@@ -233,6 +244,7 @@ export function resolveModelDefaultsSettings(
   };
   return {
     secretName: read(DEFAULT_MODEL_SECRET_NAME_ENV) ?? DEFAULT_MODEL_SECRET_NAME_FALLBACK,
+    secretValue: read(DEFAULT_MODEL_SECRET_VALUE_ENV),
     baseUrl: read(DEFAULT_BASE_URL_ENV),
     hermesGatewayUrl: read(HERMES_GATEWAY_URL_ENV),
     openclawUrl: read(OPENCLAW_URL_ENV),
@@ -353,4 +365,52 @@ export function applyModelDefaultsPatch(
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Gives a brand-new company the gateway key, so the agents provisioned with it
+ * have something to bind to.
+ *
+ * Must run between creating the company and provisioning its built-in agents:
+ * those are created in the same call, milliseconds later, and a key that
+ * arrives after them is a key they never get.
+ *
+ * Never throws. A company that fails to get its key is still a usable company —
+ * its agents come up with the gateway and model set and only the credential
+ * missing, which surfaces through the normal configuration-incomplete path.
+ * Aborting company creation over it would be a worse trade.
+ */
+export async function seedCompanyModelSecret(input: {
+  secretsSvc: {
+    getByName: (companyId: string, name: string) => Promise<{ id: string } | null | undefined>;
+    createManagedLocalSecret: (
+      companyId: string,
+      secret: { name: string; key: string; value: string; description?: string | null },
+      actor?: { userId?: string | null; agentId?: string | null },
+    ) => Promise<unknown>;
+  };
+  companyId: string;
+  logger?: { warn: (obj: unknown, msg: string) => void };
+}): Promise<"seeded" | "already-present" | "not-configured" | "failed"> {
+  const settings = resolveModelDefaultsSettings();
+  if (!settings.secretValue) return "not-configured";
+
+  try {
+    if (await input.secretsSvc.getByName(input.companyId, settings.secretName)) {
+      return "already-present";
+    }
+    await input.secretsSvc.createManagedLocalSecret(input.companyId, {
+      name: settings.secretName,
+      key: settings.secretName,
+      value: settings.secretValue,
+      description: "Shared model gateway key, seeded at company creation. Replace the value to bill this team separately.",
+    });
+    return "seeded";
+  } catch (err) {
+    input.logger?.warn(
+      { err, companyId: input.companyId, secretName: settings.secretName },
+      "Could not seed the model gateway secret; agents will be created without a key binding",
+    );
+    return "failed";
+  }
 }
