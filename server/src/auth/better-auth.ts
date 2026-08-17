@@ -3,6 +3,8 @@ import type { IncomingHttpHeaders } from "node:http";
 import { betterAuth, type Auth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { toNodeHandler } from "better-auth/node";
+import { genericOAuth } from "better-auth/plugins";
+import { ACCOUNT_LINKING_OPTIONS, resolveOidcProviderConfig } from "./waffo-sso.js";
 import type { Db } from "@paperclipai/db";
 import {
   authAccounts,
@@ -38,7 +40,6 @@ type BetterAuthInstance = BetterAuthHandlerTarget & BetterAuthSessionResolver;
 
 const AUTH_COOKIE_PREFIX_FALLBACK = "default";
 const AUTH_COOKIE_PREFIX_INVALID_SEGMENTS_RE = /[^a-zA-Z0-9_-]+/g;
-
 export function deriveAuthCookiePrefix(instanceId = resolvePaperclipInstanceId()): string {
   const scopedInstanceId = instanceId
     .trim()
@@ -161,6 +162,7 @@ export function createBetterAuthInstance(db: Db, config: Config, trustedOrigins:
     authPublicBaseUrl: config.authPublicBaseUrl,
     publicUrl,
   });
+  const oidcProvider = resolveOidcProviderConfig();
 
   const authConfig = {
     baseURL: baseUrl,
@@ -180,6 +182,12 @@ export function createBetterAuthInstance(db: Db, config: Config, trustedOrigins:
       requireEmailVerification: false,
       disableSignUp: config.authDisableSignUp,
     },
+    account: {
+      accountLinking: ACCOUNT_LINKING_OPTIONS,
+    },
+    plugins: oidcProvider
+      ? [genericOAuth({ config: [oidcProvider] })]
+      : [],
     rateLimit: buildBetterAuthRateLimitOptions({
       deploymentMode: config.deploymentMode,
       deploymentExposure: config.deploymentExposure,

@@ -20,6 +20,10 @@ export interface SignOutResult {
   redirectTo?: string;
 }
 
+export interface OidcSignInInput {
+  callbackURL: string;
+}
+
 export class AuthApiError extends Error {
   status: number;
   code: string | null;
@@ -168,6 +172,21 @@ export const authApi = {
 
   signUpEmail: async (input: { name: string; email: string; password: string }) => {
     await authPost("/sign-up/email", input);
+  },
+
+  signInOidc: async (input: OidcSignInInput): Promise<string> => {
+    const payload = await authPost("/sign-in/oauth2", {
+      providerId: "jumpcloud",
+      callbackURL: input.callbackURL,
+    });
+    const redirectUrl =
+      payload && typeof payload === "object"
+        ? (payload as Record<string, unknown>).url
+        : null;
+    if (typeof redirectUrl !== "string" || redirectUrl.length === 0) {
+      throw new Error("OIDC provider did not return a redirect URL");
+    }
+    return redirectUrl;
   },
 
   getProfile: async (): Promise<CurrentUserProfile> => {

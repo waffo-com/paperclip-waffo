@@ -11,13 +11,20 @@ import { AuthPage } from "./Auth";
 const getSessionMock = vi.hoisted(() => vi.fn());
 const signInEmailMock = vi.hoisted(() => vi.fn());
 const signUpEmailMock = vi.hoisted(() => vi.fn());
+const signInOidcMock = vi.hoisted(() => vi.fn());
+const navigateTopLevelMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../api/auth", () => ({
   authApi: {
     getSession: () => getSessionMock(),
     signInEmail: (input: unknown) => signInEmailMock(input),
     signUpEmail: (input: unknown) => signUpEmailMock(input),
+    signInOidc: (input: unknown) => signInOidcMock(input),
   },
+}));
+
+vi.mock("../lib/browserNavigation", () => ({
+  navigateTopLevel: (target: string) => navigateTopLevelMock(target),
 }));
 
 // The ASCII art animation drives a canvas/requestAnimationFrame loop that adds
@@ -88,6 +95,7 @@ describe("AuthPage", () => {
     getSessionMock.mockResolvedValue(null);
     signInEmailMock.mockResolvedValue(undefined);
     signUpEmailMock.mockResolvedValue(undefined);
+    signInOidcMock.mockResolvedValue("https://oauth.id.jumpcloud.com/authorize");
   });
 
   afterEach(() => {
@@ -166,6 +174,29 @@ describe("AuthPage", () => {
     expect(nameInput.getAttribute("autocomplete")).toBe("name");
     expect(nameInput.required).toBe(true);
     expect(passwordInput.getAttribute("autocomplete")).toBe("new-password");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("starts JumpCloud SSO and follows the provider redirect", async () => {
+    const { root } = await mount();
+
+    const ssoButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Continue with Waffo SSO",
+    );
+    expect(ssoButton).not.toBeNull();
+
+    await act(async () => {
+      ssoButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushReact();
+
+    expect(signInOidcMock).toHaveBeenCalledWith({ callbackURL: "/" });
+    expect(navigateTopLevelMock).toHaveBeenCalledWith(
+      "https://oauth.id.jumpcloud.com/authorize",
+    );
 
     await act(async () => {
       root.unmount();

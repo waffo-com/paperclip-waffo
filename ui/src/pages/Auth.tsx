@@ -5,6 +5,7 @@ import { authApi } from "../api/auth";
 import { queryKeys } from "../lib/queryKeys";
 import { getRememberedInvitePath } from "../lib/invite-memory";
 import { Button } from "@/components/ui/button";
+import { SsoDivider, SsoSignInButton } from "../components/SsoSignInButton";
 import { AsciiArtAnimation } from "@/components/AsciiArtAnimation";
 import { PaperclipLoading } from "@/components/AnimatedPaperclipIcon";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -98,8 +99,16 @@ export function AuthPage() {
               : "Create an account for this instance. Email confirmation is not required in v1."}
           </p>
 
+          <SsoSignInButton
+            callbackURL={nextPath}
+            variant="outline"
+            disabled={mutation.isPending}
+            onError={setError}
+          />
+          <SsoDivider />
+
           <form
-            className="mt-6 space-y-4"
+            className="space-y-4"
             method="post"
             action={mode === "sign_up" ? "/api/auth/sign-up/email" : "/api/auth/sign-in/email"}
             onSubmit={(event) => {
