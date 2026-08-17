@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AGENT_ADAPTER_TYPES } from "@paperclipai/shared";
 import type { AgentAdapterType, JoinRequest } from "@paperclipai/shared";
 import { Button } from "@/components/ui/button";
+import { SsoSignInButton } from "../components/SsoSignInButton";
 import { CompanyPatternIcon } from "@/components/CompanyPatternIcon";
 import { useCompany } from "@/context/CompanyContext";
 import { Link, useNavigate, useParams } from "@/lib/router";
@@ -402,6 +403,7 @@ export function InviteLandingPage() {
     },
   });
 
+
   const joinButtonLabel = useMemo(() => {
     if (!invite) return "Continue";
     if (isCurrentMember) return "Open company";
@@ -653,6 +655,20 @@ export function InviteLandingPage() {
                       ? `Start with a Paperclip account. After that, you'll come right back here to accept the invite for ${companyDisplayName}.`
                       : "Use the Paperclip account that already matches this invite. If you do not have one yet, switch back to create account."}
                   </p>
+                </div>
+
+                <div className="space-y-3">
+                  <SsoSignInButton
+                    callbackURL={`/invite/${token}`}
+                    disabled={authMutation.isPending}
+                    onError={(message) => setAuthFeedback({ tone: "error", message })}
+                    beforeStart={() => rememberPendingInviteToken(token)}
+                  />
+                  <div className="flex items-center gap-3 text-xs text-zinc-500">
+                    <div className="h-px flex-1 bg-zinc-800" />
+                    <span>or use email</span>
+                    <div className="h-px flex-1 bg-zinc-800" />
+                  </div>
                 </div>
 
                 <div className="flex gap-2">

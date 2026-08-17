@@ -16,6 +16,8 @@ const signUpEmailMock = vi.hoisted(() => vi.fn());
 const healthGetMock = vi.hoisted(() => vi.fn());
 const listCompaniesMock = vi.hoisted(() => vi.fn());
 const setSelectedCompanyIdMock = vi.hoisted(() => vi.fn());
+const signInOidcMock = vi.hoisted(() => vi.fn());
+const navigateTopLevelMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../api/access", () => ({
   accessApi: {
@@ -29,9 +31,13 @@ vi.mock("../api/auth", () => ({
     getSession: () => getSessionMock(),
     signInEmail: (input: unknown) => signInEmailMock(input),
     signUpEmail: (input: unknown) => signUpEmailMock(input),
+    signInOidc: (input: unknown) => signInOidcMock(input),
   },
 }));
 
+vi.mock("../lib/browserNavigation", () => ({
+  navigateTopLevel: (target: string) => navigateTopLevelMock(target),
+}));
 vi.mock("../api/health", () => ({
   healthApi: {
     get: () => healthGetMock(),
@@ -120,6 +126,8 @@ describe("InviteLandingPage", () => {
     getSessionMock.mockResolvedValue(null);
     signInEmailMock.mockResolvedValue(undefined);
     signUpEmailMock.mockResolvedValue(undefined);
+    signInOidcMock.mockResolvedValue("https://oauth.id.jumpcloud.com/authorize");
+    navigateTopLevelMock.mockReset();
     setSelectedCompanyIdMock.mockReset();
   });
 
@@ -208,6 +216,49 @@ describe("InviteLandingPage", () => {
     expect(container.querySelector('input[name="name"]')).toBeNull();
     expect(container.textContent).toContain("Sign in to continue");
     expect(localStorage.getItem("paperclip:pending-invite-token")).toBe("pcp_invite_test");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("starts JumpCloud SSO from the invite page and returns to this invite", async () => {
+    // A first-time SSO user has no email/password account; the inline form is a
+    // dead end for them. The SSO button must send them through JumpCloud with a
+    // callback back to this same invite, so the session that returns completes
+    // the invite automatically.
+    const root = createRoot(container);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/invite/pcp_invite_test"]}>
+          <QueryClientProvider client={queryClient}>
+            <Routes>
+              <Route path="/invite/:token" element={<InviteLandingPage />} />
+            </Routes>
+          </QueryClientProvider>
+        </MemoryRouter>,
+      );
+    });
+    await flushReact();
+    await flushReact();
+
+    const ssoButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Continue with Waffo SSO",
+    );
+    expect(ssoButton).not.toBeUndefined();
+
+    await act(async () => {
+      ssoButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushReact();
+    await flushReact();
+
+    expect(signInOidcMock).toHaveBeenCalledWith({ callbackURL: "/invite/pcp_invite_test" });
+    expect(navigateTopLevelMock).toHaveBeenCalledWith("https://oauth.id.jumpcloud.com/authorize");
 
     await act(async () => {
       root.unmount();
