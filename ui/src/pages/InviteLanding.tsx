@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AGENT_ADAPTER_TYPES } from "@paperclipai/shared";
 import type { AgentAdapterType, JoinRequest } from "@paperclipai/shared";
 import { Button } from "@/components/ui/button";
-import { SsoSignInButton } from "../components/SsoSignInButton";
+import { SsoDivider, SsoSignInButton } from "../components/SsoSignInButton";
 import { CompanyPatternIcon } from "@/components/CompanyPatternIcon";
 import { useCompany } from "@/context/CompanyContext";
 import { Link, useNavigate, useParams } from "@/lib/router";
@@ -664,11 +664,7 @@ export function InviteLandingPage() {
                     onError={(message) => setAuthFeedback({ tone: "error", message })}
                     beforeStart={() => rememberPendingInviteToken(token)}
                   />
-                  <div className="flex items-center gap-3 text-xs text-zinc-500">
-                    <div className="h-px flex-1 bg-zinc-800" />
-                    <span>or use email</span>
-                    <div className="h-px flex-1 bg-zinc-800" />
-                  </div>
+                  <SsoDivider lineClass="bg-zinc-800" labelClass="text-zinc-500" />
                 </div>
 
                 <div className="flex gap-2">

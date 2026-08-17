@@ -9,11 +9,14 @@
  * with "Authentication required", and every new team repeats the setup before
  * anything runs. Neither is something a business user can do.
  *
- * So the deployment configures the gateway once and two callers use it: the
- * creation form prefills from it (visible, editable, before saving), and
- * `agentService.create` fills in whatever the caller still left out (which is
- * what covers agents nobody filled a form for). Both read the same specs below,
- * so the two cannot drift.
+ * So the deployment configures the gateway once, and everything flows through
+ * `fillModelDefaults` below. Two callers reach it: the creation form, via the
+ * prefill route, so the fields arrive visible and editable before saving; and
+ * `agentService.create`, which fills in whatever was still left out and so
+ * covers agents nobody filled a form for — a CEO hire, a built-in, a plugin.
+ *
+ * The client never re-derives any of this. It posts its draft and assigns what
+ * comes back, so the fill-in rule has exactly one implementation.
  *
  * The API key is always bound as a `secret_ref` to a COMPANY secret looked up
  * by name, never an inline value. Each team therefore lands on its own key
@@ -24,33 +27,31 @@
  * Defaults only ever FILL IN. Any key the caller supplied is left untouched.
  */
 
-export const DEFAULT_MODEL_SECRET_NAME_ENV = "PAPERCLIP_DEFAULT_MODEL_SECRET_NAME";
+const DEFAULT_MODEL_SECRET_NAME_ENV = "PAPERCLIP_DEFAULT_MODEL_SECRET_NAME";
 export const DEFAULT_MODEL_SECRET_NAME_FALLBACK = "ai-proxy-api-key";
-export const DEFAULT_BASE_URL_ENV = "PAPERCLIP_DEFAULT_MODEL_BASE_URL";
+const DEFAULT_BASE_URL_ENV = "PAPERCLIP_DEFAULT_MODEL_BASE_URL";
 /**
  * Two model settings rather than one per adapter: the gateway speaks two
  * protocols, and which one an agent needs follows from its harness, not from a
  * separate choice the operator should have to make four times.
  */
-export const DEFAULT_ANTHROPIC_MODEL_ENV = "PAPERCLIP_DEFAULT_ANTHROPIC_MODEL";
-export const DEFAULT_OPENAI_MODEL_ENV = "PAPERCLIP_DEFAULT_OPENAI_MODEL";
+const DEFAULT_ANTHROPIC_MODEL_ENV = "PAPERCLIP_DEFAULT_ANTHROPIC_MODEL";
+const DEFAULT_OPENAI_MODEL_ENV = "PAPERCLIP_DEFAULT_OPENAI_MODEL";
+// Gateway-style harnesses point at a service this deployment runs rather than
+// at the model gateway, so they read their own endpoint setting.
+const HERMES_GATEWAY_URL_ENV = "PAPERCLIP_DEFAULT_HERMES_GATEWAY_URL";
+const OPENCLAW_URL_ENV = "PAPERCLIP_DEFAULT_OPENCLAW_URL";
 
 /**
- * Harnesses this deployment cannot point at the gateway, and why. Kept as data
- * so the reason is answerable without re-deriving it from each adapter's
- * source — the question "why is Gemini not prefilled" has come up once already.
+ * Harnesses deliberately left out, and why — so "why is Gemini not prefilled"
+ * is answerable here rather than by re-deriving it from each adapter's source:
+ *
+ *   gemini_local, grok_local  read GEMINI/GOOGLE/XAI keys with no endpoint
+ *                             override, and the gateway serves neither model
+ *   cursor, cursor_cloud      authenticate to Cursor's own service
+ *   process, http             run a command / call a webhook; no model of
+ *                             their own to credential
  */
-export const HERMES_GATEWAY_URL_ENV = "PAPERCLIP_DEFAULT_HERMES_GATEWAY_URL";
-export const OPENCLAW_URL_ENV = "PAPERCLIP_DEFAULT_OPENCLAW_URL";
-
-export const UNSUPPORTED_ADAPTER_REASONS: Record<string, string> = {
-  gemini_local: "reads GEMINI_API_KEY/GOOGLE_API_KEY with no endpoint override, and the gateway serves no Gemini model",
-  grok_local: "reads XAI_API_KEY with no endpoint override, and the gateway serves no Grok model",
-  cursor: "authenticates to Cursor's own service with CURSOR_API_KEY; not an OpenAI-compatible client",
-  cursor_cloud: "runs on Cursor's cloud with CURSOR_API_KEY; nothing routes through a self-hosted gateway",
-  process: "runs an arbitrary command; it has no model of its own to credential",
-  http: "calls a webhook; it has no model of its own to credential",
-};
 
 /**
  * How each adapter is pointed at the gateway.
@@ -88,6 +89,12 @@ interface AdapterGatewaySpec {
    * reason defaults cannot be env-only.
    */
   buildValues?: (input: { baseUrl: string; secretId: string | null }) => Record<string, unknown>;
+  /**
+   * Whether this harness has anywhere to put the company API key. Declared
+   * rather than inferred so a harness that takes only a URL — openclaw_gateway
+   * today — does not cost a secret lookup whose result is then discarded.
+   */
+  usesSecret: boolean;
 }
 
 const PROVIDER_ID = "waffo-gateway";
@@ -99,6 +106,7 @@ const ADAPTER_GATEWAY_SPECS: Record<string, AdapterGatewaySpec> = {
   // The only one with a plain base-URL variable; the rest carry a provider
   // table because their CLI has no endpoint flag.
   claude_local: {
+    usesSecret: true,
     endpointKey: "baseUrl",
     apiKeyEnv: "ANTHROPIC_API_KEY",
     modelKey: "anthropicModel",
@@ -110,6 +118,7 @@ const ADAPTER_GATEWAY_SPECS: Record<string, AdapterGatewaySpec> = {
   // serves Codex over /v1/responses; `env_key` names the variable the key
   // binding fills.
   codex_local: {
+    usesSecret: true,
     endpointKey: "baseUrl",
     apiKeyEnv: "OPENAI_API_KEY",
     modelKey: "openaiModel",
@@ -130,6 +139,7 @@ const ADAPTER_GATEWAY_SPECS: Record<string, AdapterGatewaySpec> = {
   // OpenCode's providers map is keyed by provider id, and the model must be
   // listed for it to be selectable — an empty descriptor is enough.
   opencode_local: {
+    usesSecret: true,
     endpointKey: "baseUrl",
     apiKeyEnv: "OPENAI_API_KEY",
     modelKey: "openaiModel",
@@ -148,6 +158,7 @@ const ADAPTER_GATEWAY_SPECS: Record<string, AdapterGatewaySpec> = {
   // metadata, which for an internal gateway is not billed per token — zeroed
   // rather than guessed, so nothing here pretends to know a price.
   pi_local: {
+    usesSecret: true,
     apiKeyEnv: "ANTHROPIC_API_KEY",
     modelKey: "anthropicModel",
     endpointKey: "baseUrl",
@@ -175,12 +186,14 @@ const ADAPTER_GATEWAY_SPECS: Record<string, AdapterGatewaySpec> = {
   // stays a step in Hermes' own config, and no `model` is set because which
   // provider it uses is decided there too.
   hermes_local: {
+    usesSecret: true,
     apiKeyEnv: "ANTHROPIC_API_KEY",
   },
   // Talks to an already-running Hermes API server, so the endpoint to prefill
   // is that server's, not the model gateway's. Its apiKey field takes a
   // secret_ref, so the credential stays a company secret like everywhere else.
   hermes_gateway: {
+    usesSecret: true,
     endpointKey: "hermesGatewayUrl",
     buildValues: ({ baseUrl, secretId }) => ({
       apiBaseUrl: baseUrl,
@@ -191,17 +204,11 @@ const ADAPTER_GATEWAY_SPECS: Record<string, AdapterGatewaySpec> = {
   // secret_ref support, so only the URL is prefilled — a token belongs to the
   // team and should not be baked inline into every agent this creates.
   openclaw_gateway: {
+    usesSecret: false,
     endpointKey: "openclawUrl",
     buildValues: ({ baseUrl }) => ({ url: baseUrl }),
   },
 };
-
-export function isAdapterWithModelDefaults(adapterType: string | null | undefined): boolean {
-  return Boolean(adapterType && adapterType in ADAPTER_GATEWAY_SPECS);
-}
-
-/** Adapter types the creation form can prefill. */
-export const MODEL_DEFAULT_ADAPTER_TYPES = Object.keys(ADAPTER_GATEWAY_SPECS);
 
 export interface ModelDefaultsSettings {
   secretName: string;
@@ -312,7 +319,7 @@ export async function fillModelDefaults(input: {
   if (!spec) return input.adapterConfig;
 
   const settings = resolveModelDefaultsSettings();
-  const secretId = specConsumesSecret(spec)
+  const secretId = spec.usesSecret
     ? (await input.secretsSvc.getByName(input.companyId, settings.secretName))?.id ?? null
     : null;
 
@@ -327,16 +334,6 @@ export async function fillModelDefaults(input: {
   );
 }
 
-/**
- * openclaw_gateway takes only a URL — looking up a secret for it would be a
- * round-trip whose result is discarded.
- */
-function specConsumesSecret(spec: AdapterGatewaySpec): boolean {
-  if (spec.apiKeyEnv) return true;
-  if (!spec.buildValues) return false;
-  return Object.keys(spec.buildValues({ baseUrl: "https://probe.invalid", secretId: "probe" })).length
-    !== Object.keys(spec.buildValues({ baseUrl: "https://probe.invalid", secretId: null })).length;
-}
 
 export function applyModelDefaultsPatch(
   adapterConfig: Record<string, unknown>,

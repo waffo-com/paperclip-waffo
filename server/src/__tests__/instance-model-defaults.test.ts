@@ -2,11 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyModelDefaultsPatch,
   buildModelDefaultsPatch,
-  isAdapterWithModelDefaults,
   resolveModelDefaultsSettings,
   DEFAULT_MODEL_SECRET_NAME_FALLBACK,
-  MODEL_DEFAULT_ADAPTER_TYPES,
-  UNSUPPORTED_ADAPTER_REASONS,
   type ModelDefaultsSettings,
 } from "../services/instance-model-defaults.js";
 
@@ -46,24 +43,27 @@ describe("resolveModelDefaultsSettings", () => {
 });
 
 describe("adapter coverage", () => {
-  it("covers exactly the harnesses that can reach a self-hosted gateway", () => {
-    expect(MODEL_DEFAULT_ADAPTER_TYPES.sort()).toEqual([
-      "claude_local",
-      "codex_local",
-      "hermes_gateway",
-      "hermes_local",
-      "openclaw_gateway",
-      "opencode_local",
-      "pi_local",
-    ]);
+  const SUPPORTED = ["claude_local", "codex_local", "opencode_local", "pi_local",
+    "hermes_local", "hermes_gateway", "openclaw_gateway"];
+
+  it("wires every harness that can reach a service this deployment runs", () => {
+    for (const adapterType of SUPPORTED) {
+      const patch = buildModelDefaultsPatch({
+        adapterType,
+        adapterConfig: {},
+        secretId: SECRET_ID,
+        settings: { ...GATEWAY, hermesGatewayUrl: "https://hermes.test", openclawUrl: "wss://openclaw.test" },
+      });
+      const wiredSomething = Object.keys(patch.env).length > 0 || Object.keys(patch.values).length > 0;
+      expect(wiredSomething, `${adapterType} prefilled nothing`).toBe(true);
+    }
   });
 
-  it("records why each remaining harness is out of scope", () => {
-    // Not decoration: "why is Gemini not prefilled" is a question this
-    // deployment will be asked, and the answer should not need a code dive.
+  it("leaves harnesses it cannot point anywhere completely alone", () => {
+    // Half-configuring these would produce an agent that looks ready and still
+    // fails; blank is the honest state.
     for (const adapterType of ["gemini_local", "grok_local", "cursor", "cursor_cloud", "process", "http"]) {
-      expect(isAdapterWithModelDefaults(adapterType)).toBe(false);
-      expect(UNSUPPORTED_ADAPTER_REASONS[adapterType]).toBeTruthy();
+      expect(patchFor(adapterType)).toEqual({ env: {}, model: null, values: {} });
     }
   });
 });

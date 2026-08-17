@@ -105,7 +105,9 @@ export function AuthPage() {
             disabled={mutation.isPending}
             onError={setError}
           />
-          <SsoDivider />
+          <div className="my-5">
+            <SsoDivider />
+          </div>
 
           <form
             className="space-y-4"

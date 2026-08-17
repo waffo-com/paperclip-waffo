@@ -46,13 +46,21 @@ export function SsoSignInButton(props: {
   );
 }
 
-/** The "or use email" rule shown between SSO and the email form. */
-export function SsoDivider() {
+/**
+ * The "or use email" rule shown between SSO and the email form.
+ *
+ * The colours are props because the two pages that show it do not share a
+ * palette: the sign-in page follows the app theme, while the invite page is a
+ * standalone dark page using explicit zinc. Copying the markup to serve both
+ * would leave the label duplicated, which is the thing worth sharing.
+ */
+export function SsoDivider(props: { lineClass?: string; labelClass?: string }) {
+  const line = `h-px flex-1 ${props.lineClass ?? "bg-border"}`;
   return (
-    <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-      <div className="h-px flex-1 bg-border" />
+    <div className={`flex items-center gap-3 text-xs ${props.labelClass ?? "text-muted-foreground"}`}>
+      <div className={line} />
       <span>or use email</span>
-      <div className="h-px flex-1 bg-border" />
+      <div className={line} />
     </div>
   );
 }

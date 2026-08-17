@@ -20,6 +20,14 @@ export interface SignOutResult {
   redirectTo?: string;
 }
 
+/**
+ * Must match `OIDC_PROVIDER_ID` in server/src/auth/waffo-sso.ts — Better Auth
+ * routes the sign-in by this id, and the callback path it registers with the
+ * provider is derived from it. Duplicated across the boundary because the
+ * server does not publish its auth configuration to the client.
+ */
+const OIDC_PROVIDER_ID = "jumpcloud";
+
 export interface OidcSignInInput {
   callbackURL: string;
 }
@@ -176,7 +184,7 @@ export const authApi = {
 
   signInOidc: async (input: OidcSignInInput): Promise<string> => {
     const payload = await authPost("/sign-in/oauth2", {
-      providerId: "jumpcloud",
+      providerId: OIDC_PROVIDER_ID,
       callbackURL: input.callbackURL,
     });
     const redirectUrl =
