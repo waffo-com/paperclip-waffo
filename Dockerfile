@@ -54,6 +54,16 @@ COPY --from=deps /app /app
 COPY . .
 RUN pnpm --filter @paperclipai/ui build
 RUN pnpm --filter @paperclipai/plugin-sdk build
+# The llm-wiki plugin ships source only, and its `dist/` is what the plugin
+# loader resolves `paperclipPlugin.manifest` against. Installing it from a local
+# path builds that bundle at install time — into the container's writable layer,
+# not the image — so every container restart drops it and the plugin comes back
+# as `error` ("no longer exposes a Paperclip manifest"). It also never self-heals:
+# it is absent from the bundled auto-install list, and startup skips reinstalling
+# any plugin whose record is not `uninstalled`. Building it here makes the bundle
+# part of the image, which is the only place a restart cannot erase.
+RUN pnpm --filter @paperclipai/plugin-llm-wiki build
+RUN test -f packages/plugins/plugin-llm-wiki/dist/manifest.js || (echo "ERROR: llm-wiki plugin bundle missing" && exit 1)
 RUN pnpm --filter @paperclipai/server build
 RUN test -f server/dist/index.js || (echo "ERROR: server build output missing" && exit 1)
 

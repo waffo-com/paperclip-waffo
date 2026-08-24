@@ -16,6 +16,14 @@ export const models = [
   { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
   { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
+  // Gateway-specific aliases. Our LiteLLM proxy exposes the models above under
+  // its own names, and a team's key is granted a subset of them — `-sub` routes
+  // to a different backend than the bare name. Agents run on the `-sub` pair, so
+  // without these entries the picker cannot even display an agent's current
+  // model, and opening the form is enough to silently reset it to something the
+  // key is not entitled to use.
+  { id: "claude-sonnet-5-sub", label: "Claude Sonnet 5 (gateway sub)" },
+  { id: "claude-opus-4-7-sub", label: "Claude Opus 4.7 (gateway sub)" },
 ];
 
 export const modelProfiles: AdapterModelProfileDefinition[] = [
