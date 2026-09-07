@@ -2,6 +2,90 @@ type HotRestartShutdownPreparation = {
   skipDrain: boolean;
 };
 
+type ShutdownLogger = {
+  info(obj: object, msg: string): void;
+  error(obj: object, msg: string): void;
+};
+
+export async function drainRunExecutionFinalizersForShutdown(input: {
+  signal: "SIGINT" | "SIGTERM";
+  drain: (() => Promise<void>) | null;
+  timeoutMs?: number;
+  log: ShutdownLogger;
+}): Promise<"drained" | "timed_out" | "unavailable"> {
+  if (!input.drain) return "unavailable";
+  const timeoutMs = input.timeoutMs ?? 5_000;
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    const result = await Promise.race([
+      input.drain().then(() => "drained" as const),
+      new Promise<"timed_out">((resolve) => {
+        timer = setTimeout(() => resolve("timed_out"), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+    if (result === "timed_out") {
+      input.log.info(
+        { signal: input.signal, timeoutMs },
+        "bounded heartbeat execution finalizer drain timed out",
+      );
+    }
+    return result;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Runs the final, ordered teardown of the server. It awaits the application
+ * service cleanup first, so a live setup-token login session stops and releases
+ * its sandbox lease before the database and the provider stop. The caller runs
+ * `process.exit(0)` only after this helper resolves, so an orderly shutdown
+ * never leaves a sandbox lease or confidential login state alive past the
+ * process exit.
+ *
+ * A step that rejects does not stop the teardown. The helper logs the error and
+ * continues to the next step. A failed setup-token lease release stays a
+ * durable record for the startup reaper; the helper surfaces it in the log
+ * instead of blocking the exit path.
+ */
+export async function finalizeServerShutdown(input: {
+  signal: "SIGINT" | "SIGTERM";
+  shutdownAppServices: (() => Promise<void>) | undefined;
+  stopEmbeddedPostgres: (() => Promise<void>) | null;
+  shutdownInstrumentation: () => Promise<void>;
+  shutdownSentry: () => Promise<void>;
+  log: ShutdownLogger;
+}): Promise<void> {
+  const { signal } = input;
+
+  // Await the application service cleanup, so a live setup-token login session
+  // releases its sandbox lease before the database and the provider stop. A
+  // rejected cleanup stays durable for the reaper; it does not block the exit.
+  try {
+    await input.shutdownAppServices?.();
+  } catch (err) {
+    input.log.error({ err, signal }, "Application service shutdown failed");
+  }
+
+  if (input.stopEmbeddedPostgres) {
+    input.log.info({ signal }, "Stopping embedded PostgreSQL");
+    try {
+      await input.stopEmbeddedPostgres();
+    } catch (err) {
+      input.log.error({ err }, "Failed to stop embedded PostgreSQL cleanly");
+    }
+  }
+
+  // Flush buffered OTel spans before the process goes away; without this await
+  // the exporter's final batch is dropped on exit.
+  await input.shutdownInstrumentation();
+
+  // Flush buffered Sentry events before the process goes away; without this
+  // await the last events are dropped on exit.
+  await input.shutdownSentry();
+}
+
 const COORDINATED_SHUTDOWN_SIGNALS = ["SIGINT", "SIGTERM"] as const;
 
 type ShutdownSignalTarget = {
