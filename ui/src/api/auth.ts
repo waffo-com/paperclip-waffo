@@ -190,8 +190,14 @@ export const authApi = {
   },
 
   signInOidc: async (input: OidcSignInInput): Promise<string> => {
-    const payload = await authPost("/sign-in/oauth2", {
-      providerId: OIDC_PROVIDER_ID,
+    // Better Auth 1.7 removed genericOAuth's own `/sign-in/oauth2` endpoint —
+    // the plugin now merges its providers into `ctx.socialProviders` and the
+    // core `/sign-in/social` route serves them, keyed on `provider` rather than
+    // `providerId`. The old path 404s, which is a runtime break a typecheck
+    // cannot catch. `provider` accepts any string (SocialProviderListEnum is
+    // `z.enum(builtins).or(z.string())`), so the JumpCloud id passes validation.
+    const payload = await authPost("/sign-in/social", {
+      provider: OIDC_PROVIDER_ID,
       callbackURL: input.callbackURL,
     });
     const redirectUrl =
