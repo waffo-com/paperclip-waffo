@@ -91,12 +91,12 @@ describe("authApi.signInOidc", () => {
     await expect(authApi.signInOidc({ callbackURL: "/" })).resolves.toBe(
       "https://oauth.id.jumpcloud.com/authorize",
     );
-    expect(fetchMock).toHaveBeenCalledWith("/api/auth/sign-in/oauth2", {
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/sign-in/social", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        providerId: "jumpcloud",
+        provider: "jumpcloud",
         callbackURL: "/",
       }),
     });
